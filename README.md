@@ -1,38 +1,26 @@
 # dbx
 
-[中文说明](README.zh-CN.md)
+[中文说明](README.zh-CN.md) · [Repository](https://github.com/fluxsce/dbx) · [Changelog](CHANGELOG.md) · [License](LICENSE)
 
-`github.com/fluxsce/dbx` is a small database session for Go: one `*DB`, named SQL parameters, and a dialect plugin per engine.
+A Go database session: one `*DB`, named parameters `@name`, and one dialect plugin per engine. The pool and a transaction are the same type.
 
-Remote: `https://github.com/fluxsce/dbx.git`
+## Install
 
-It follows `database/sql` (core plus registered drivers) and the GORM idea that one type is both the pool and a transaction.
-
-```text
-dbx/
-  db/                 # *DB: pool, SQL, transactions, insert/update/delete
-  utils/              # placeholder rebind and identifier quoting
-  record/             # optional column types: Flag, Decimal, wall-clock time
-  driver/
-    sqlite/
-    postgres/
-    mysql/
-    clickhouse/
-    sqlserver/
-    oracle/           # not linked unless built with -tags oracle; registers oracle and oracle11g
+```bash
+go get github.com/fluxsce/dbx@v1.0.0
 ```
 
-SQL uses `@name` only. Args keys have no `@`. Do not write `?` or `$1`. DDL goes through `Exec`.
+The module path is `github.com/fluxsce/dbx`. v1 has no `/v2` suffix. Blank-import the drivers you link.
 
 ## Sessions
 
 A pool `*DB` auto-commits each successful statement. Many goroutines may share that pool.
 
-`Begin` returns a transaction the caller commits or rolls back. That value is one goroutine only. Do not pass it to another goroutine, and do not use it after `Commit` or `Rollback`.
+`Begin` returns a transaction the caller commits or rolls back. That value stays on one goroutine, and only until `Commit` or `Rollback`. `Begin` inside an open transaction returns an error.
 
-`Tx` is the same transaction with the commit decision in the callback: nil commits, an error or panic rolls back. A `Tx` started inside an open transaction joins that transaction.
+`Tx` commits when the callback returns nil, and rolls back when it returns an error or panics. The panic continues after rollback. A `Tx` call inside an open transaction joins that transaction.
 
-Several goroutines may each call `Begin` on the same pool. Each returned transaction is independent. They must not share one transaction value.
+Each `Begin` on the pool returns its own transaction. Goroutines keep their own transaction values.
 
 ```go
 import (
@@ -53,13 +41,11 @@ d, err := db.Open(ctx, db.Config{
     ConnMaxIdleTime: 10 * time.Minute,
 })
 
-// Auto-commit: this INSERT is committed when Exec returns nil.
 _, err = d.Exec(ctx, `
     INSERT INTO users (id, name) VALUES (@id, @name)`,
     db.Args{"id": "u1", "name": "ada"},
 )
 
-// Caller commits.
 tx, err := d.Begin(ctx)
 if _, err = tx.Exec(ctx, `UPDATE users SET name=@name WHERE id=@id`, db.Args{"id": "u1", "name": "ada lovelace"}); err != nil {
     _ = tx.Rollback()
@@ -69,7 +55,6 @@ if err = tx.Commit(); err != nil {
     return err
 }
 
-// Callback commits on nil and rolls back on error.
 err = d.Tx(ctx, func(tx *db.DB) error {
     return tx.Insert(ctx, "users", &row)
 })
@@ -79,15 +64,19 @@ err = d.TxOptions(ctx, &sql.TxOptions{ReadOnly: true}, func(tx *db.DB) error {
 })
 ```
 
-`BeginOptions` and `TxOptions` take `*sql.TxOptions` for isolation and read-only. A nil options value uses the engine default.
+SQL uses `@name` only. Keys in `Args` have no `@`. DDL goes through `Exec`.
 
-One `Open` is one pool. An application that talks to several databases keeps its own `map[string]*db.DB` and closes each pool when that process shuts down. dbx does not keep a global connection cache.
+`BeginOptions` and `TxOptions` take `*sql.TxOptions`. A nil value uses the engine default isolation level.
+
+One `Open` is one pool. An application with several databases keeps its own `map[string]*db.DB` and closes each pool when the process shuts down.
 
 `Config.Trace` runs after each statement and after begin, commit, and rollback. A nil trace does nothing. Slow-query thresholds and log formatting stay in the caller.
 
+`Get`, `Select`, and `Each` close their rows. `Query` and `QueryPage` return rows for the caller to close.
+
 ## Engines
 
-Change `Driver` and `DSN`. Blank-import only the drivers you link.
+Change `Driver` and `DSN`, and blank-import that driver.
 
 | Import | Names |
 |---|---|
@@ -96,17 +85,25 @@ Change `Driver` and `DSN`. Blank-import only the drivers you link.
 | `github.com/fluxsce/dbx/driver/mysql` | `mysql`, `mariadb` |
 | `github.com/fluxsce/dbx/driver/clickhouse` | `clickhouse` |
 | `github.com/fluxsce/dbx/driver/sqlserver` | `sqlserver`, `mssql` |
-| `github.com/fluxsce/dbx/driver/oracle` | `oracle`, `godror`, `oracle11g`（build with `-tags oracle`） |
+| `github.com/fluxsce/dbx/driver/oracle` | `oracle`, `godror`, `oracle11g` (build with `-tags oracle`) |
 
-A new engine implements `db.Dialect` (`Name`, `Rebind`, `QuoteIdent`, `LimitSQL`) and registers an opener with `db.Register`. The limit clause lives in that driver. Oracle 11g (`Driver: "oracle11g"`) implements `PageDialect` and rewrites the SELECT with `ROW_NUMBER`. Use `QueryPage`, `SelectPage`, or `PageSQL` for paging. `Page.OrderBy` replaces the outer `ORDER BY`; `Desc` selects descending order. A `FETCH` query must already have `ORDER BY` when `OrderBy` is empty.
+ClickHouse is pure Go and is linked only when imported. Oracle needs CGO, Oracle Instant Client, and `-tags oracle`. The default `go test ./...` does not compile godror.
 
-Page with `QueryPage` / `SelectPage`. Do not hard-code `LIMIT` in business SQL. `Page` uses `page` and `pageSize`. A size below 1 becomes 20. dbx does not cap the size and does not read the URL.
+A new engine implements `db.Dialect` (`Name`, `Rebind`, `QuoteIdent`, `LimitSQL`) and registers an opener with `db.Register`. Placeholder rebinding and identifier quotes live in `utils`. Sessions, transactions, and struct mapping stay in `db`.
 
-`Insert` / `Update` quote identifiers for the current engine. Hand-written SQL should use `d.QuoteColumns`.
+ClickHouse updates and deletes are `ALTER TABLE`. SQL Server keeps `?`; its driver turns that into `@p1`. Oracle 12c uses `:1` and `FETCH`. `Driver: "oracle11g"` rewrites the statement with `ROW_NUMBER`.
 
-## Column helpers
+`Insert` and `Update` quote identifiers for the current engine. Hand-written SQL should use `d.QuoteColumns`.
 
-`github.com/fluxsce/dbx/record` is optional:
+## Paging
+
+Use `QueryPage`, `SelectPage`, or `PageSQL`. The limit clause is written by the current dialect. `Page` fields are `page`, `pageSize`, `OrderBy`, and `Desc`. A `pageSize` below 1 becomes 20. dbx does not cap the size and does not read the URL.
+
+`OrderBy` replaces the outer `ORDER BY`. `Desc` selects descending order. A `FETCH` query already needs `ORDER BY` when `OrderBy` is empty.
+
+## Columns
+
+`github.com/fluxsce/dbx/record` is optional.
 
 | Column | Go | Behavior |
 |---|---|---|
@@ -114,16 +111,28 @@ Page with `QueryPage` / `SelectPage`. Do not hard-code `LIMIT` in business SQL. 
 | DECIMAL / money | `record.Decimal` | empty Decimal is written as NULL |
 | DATETIME text | `time.Time` | wall clock `2006-01-02 15:04:05`; zero is NULL |
 
-Scanning also accepts unsigned integers into signed fields when the value fits, and converts slice and map elements. Oracle `NUMBER` and LOB values are read in `driver/oracle`. ClickHouse UUID, Decimal, big integers, and Geo values are read in `driver/clickhouse`. Arrays and maps use the shared slice and map assignment.
+Scanning matches columns to `db` tags. It accepts structs, `*struct`, `[]struct`, `[]*struct`, and anonymous embeds. A non-NULL `*T` is allocated. NULL becomes the zero value or a nil pointer. `sql.Scanner` (including `sql.Null*`), `bool`, integers, floats, strings, and `[]byte` are accepted. An unsigned value that does not fit in a signed field returns an error. Slice and map elements are converted when their types differ.
+
+Oracle `NUMBER` and LOB values are read in `driver/oracle`. ClickHouse UUID, Decimal, big integers, and Geo values are read in `driver/clickhouse`. Arrays and maps use the shared slice and map assignment.
 
 Struct tags: `db:"name"`; composite key `,pk`; skip `db:"-"`; omit a zero `,omitempty`; leave a column out of UPDATE `,noupdate`.
 
 `Update` and `Delete` require a `Cond` (`d.PK` or `db.Where`). An empty condition is an error.
 
-## Release
+## Layout
 
-Versions start at 1.0.0. The module path stays `github.com/fluxsce/dbx` (v1 does not use a `/v2` suffix). The Git remote is `https://github.com/fluxsce/dbx.git`. Pushing `main` runs tests, then tags `vX.Y.Z` from the first version heading in [CHANGELOG.md](CHANGELOG.md) and publishes a GitHub Release when that tag is not already present. See [CHANGELOG.md](CHANGELOG.md).
+```text
+dbx/
+  db/                 # *DB: pool, SQL, transactions, insert/update/delete
+  utils/              # placeholder rebind and identifier quoting
+  record/             # optional column types: Flag, Decimal, wall-clock time
+  driver/             # sqlite, postgres, mysql, clickhouse, sqlserver, oracle
+```
 
-## License
+## Project
+
+Source: <https://github.com/fluxsce/dbx>
+
+Versions start at 1.0.0. A push to `main` that passes tests reads the first `## [x.y.z] - date` heading in [CHANGELOG.md](CHANGELOG.md), pushes tag `vX.Y.Z` when that tag is absent, and creates a GitHub Release. `go get` fetches that tag from this public repository. The module proxy caches it on the first request.
 
 Apache License 2.0. See [LICENSE](LICENSE).

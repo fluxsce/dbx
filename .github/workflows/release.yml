@@ -24,9 +24,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          VERSION=$(grep -m1 -E '^## [0-9]+\.[0-9]+\.[0-9]+$' CHANGELOG.md | awk '{print $2}')
+          VERSION=$(grep -m1 -E '^## \[[0-9]+\.[0-9]+\.[0-9]+\]' CHANGELOG.md | sed -E 's/^## \[([0-9]+\.[0-9]+\.[0-9]+)\].*/\1/')
           if [[ -z "${VERSION}" ]]; then
-            echo "CHANGELOG.md has no ## x.y.z heading" >&2
+            echo "CHANGELOG.md has no ## [x.y.z] heading" >&2
             exit 1
           fi
           if git rev-parse "v${VERSION}" >/dev/null 2>&1; then
@@ -34,7 +34,7 @@ jobs:
             exit 0
           fi
           awk -v ver="${VERSION}" '
-            $0 == "## " ver { found=1; next }
+            $0 ~ "^## \\[" ver "\\]" { found=1; next }
             found && /^## / { exit }
             found { print }
           ' CHANGELOG.md > release-notes.md
