@@ -9,6 +9,7 @@ import (
 
 // Insert 按结构体 `db` 标签生成 INSERT。
 // rows 可以是 *struct、[]struct、[]*struct 或 *[]struct；切片一次写入多行。
+// 多行先交给 BulkDialect；驱动返回未处理时，再按 InsertLimit 写成标准多行 INSERT。
 func (d *DB) Insert(ctx context.Context, table string, rows any) error {
 	if err := validTableErr(table); err != nil {
 		return err
@@ -29,31 +30,20 @@ func (d *DB) Insert(ctx context.Context, table string, rows any) error {
 	for _, c := range cols.cols {
 		byName[c.column] = c
 	}
-	var (
-		groups []string
-		vals   []any
-	)
-	ph := strings.Repeat("?,", len(names))
-	ph = "(" + ph[:len(ph)-1] + ")" // 一行一组 (?, ?, ...)
-	for _, rv := range list {
-		groups = append(groups, ph)
-		for _, name := range names {
-			c := byName[name]
-			fv, ok := walkField(rv, c.index, false)
-			if !ok {
-				vals = append(vals, nil)
-				continue
-			}
-			val, err := bindValue(fv)
-			if err != nil {
+	if len(list) > 1 {
+		if bulk, ok := d.dial.(BulkDialect); ok {
+			var buf []any
+			done, err := bulk.BulkInsert(ctx, d, table, names, len(list), func(i int) ([]any, error) {
+				var berr error
+				buf, berr = bindRows(buf, list[i:i+1], names, byName)
+				return buf, berr
+			})
+			if err != nil || done {
 				return err
 			}
-			vals = append(vals, val)
 		}
 	}
-	q := "INSERT INTO " + d.QuoteIdent(table) + " (" + quoteList(d, names) + ") VALUES " + strings.Join(groups, ", ")
-	_, err = d.execBound(ctx, q, vals)
-	return err
+	return d.insertSQL(ctx, table, names, byName, list)
 }
 
 // insertColumns 按第一行决定写入哪些列；omitempty 为零则跳过（后续行同列缺值写 NULL）。
@@ -170,6 +160,7 @@ func (d *DB) Update(ctx context.Context, table string, row any, cond Cond) error
 	return err
 }
 
+// mutationUpdate 生成更新语句。实现了 MutationDialect 的引擎改写整句，其余引擎使用标准 UPDATE。
 func (d *DB) mutationUpdate(table, setSQL, whereSQL string) string {
 	if m, ok := d.dial.(MutationDialect); ok {
 		return m.UpdateSQL(table, setSQL, whereSQL) // ClickHouse 等在方言内改成 ALTER TABLE
@@ -191,18 +182,10 @@ func (d *DB) Delete(ctx context.Context, table string, cond Cond) error {
 	return err
 }
 
+// mutationDelete 生成删除语句。实现了 MutationDialect 的引擎改写整句，其余引擎使用标准 DELETE。
 func (d *DB) mutationDelete(table, where string) string {
 	if m, ok := d.dial.(MutationDialect); ok {
 		return m.DeleteSQL(table, where) // 非标准删除由方言生成
 	}
 	return "DELETE FROM " + table + " WHERE " + where
-}
-
-// quoteList 按当前引擎引用一组列名，用逗号拼接。
-func quoteList(d *DB, names []string) string {
-	out := make([]string, len(names))
-	for i, n := range names {
-		out[i] = d.QuoteIdent(n)
-	}
-	return strings.Join(out, ", ")
 }

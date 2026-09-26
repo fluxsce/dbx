@@ -60,13 +60,15 @@ err = d.Tx(ctx, func(tx *db.DB) error {
 })
 ```
 
-业务 SQL 只写 `@name`，参数键不加 `@`。建表语句走 `Exec`。
+业务 SQL 只写 `@name`，参数键不加 `@`。同一条 SQL 由方言改写成 `?`、`$1` 或 `:1`。`IN (@ids)` 的参数是切片时展开成多个占位符；空切片报错；`[]byte` 仍是一个参数。切片不能写在 `IN` 之外。建表语句走 `Exec`。
+
+`Upsert` 在键不存在时插入，已存在时更新。它不是 `Insert`。ClickHouse 不支持。`Classify` 把唯一冲突、死锁、锁等待和序列化失败收成同一种分类；`Retryable` 为真时才重试整段事务。唯一冲突不要原样重试。
 
 `BeginOptions` 和 `TxOptions` 接受 `*sql.TxOptions`。传 nil 时用引擎默认隔离级别。
 
 一次 `Open` 是一个连接池。多个数据源由调用方用 `map[string]*db.DB` 按名字持有，并在进程退出时逐个 `Close`。
 
-`Config.Trace` 在每条语句以及 begin、commit、rollback 之后调用。nil 表示不记录。慢查询阈值和日志格式留在调用方。
+`Config.Trace` 是内置语句日志，在每条语句以及 begin、commit、rollback 之后调用，不占用插件名。nil 表示不记录。`Config.Plugins` 按顺序挂在这条连接池上，用来接指标、审计或链路追踪；`ContextPlugin` 在取连接前改写 context。慢查询阈值和日志格式留在调用方。插件随连接池关闭；钩子里不要再进入同一个 `*DB`。
 
 `Get`、`Select`、`Each` 会关闭结果集。`Query` 和 `QueryPage` 把结果集交给调用方关闭。
 

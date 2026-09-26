@@ -18,30 +18,7 @@ type Event struct {
 	Rows     int64
 }
 
-// TraceFunc 在每条语句以及 Begin、Commit、Rollback 之后收到 Event。
-// nil 表示不记录。回调不得 panic。
-// Commit 与 Rollback 没有上下文参数，因此传入 context.Background。
+// TraceFunc 是内置语句日志，在每条语句以及 Begin、Commit、Rollback 之后收到 Event。
+// nil 表示不记录。它不是插件，不占用 Plugins 里的名字。
+// 回调不得 panic，也不要再调用同一个 *DB。Commit 与 Rollback 传入 context.Background。
 type TraceFunc func(ctx context.Context, e Event)
-
-// finish 在 trace 非空时回调一次 Event。
-func (d *DB) finish(ctx context.Context, op, query string, args []any, rows int64, err error, start time.Time) {
-	if d == nil || d.trace == nil {
-		return
-	}
-	d.trace(ctx, Event{
-		Op:       op,
-		Query:    query,
-		Args:     args,
-		Duration: time.Since(start),
-		Err:      err,
-		Rows:     rows,
-	})
-}
-
-// mark 在需要记录耗时时返回开始时间。未配置 Trace 时返回零值，避免每次取时钟。
-func (d *DB) mark() time.Time {
-	if d == nil || d.trace == nil {
-		return time.Time{}
-	}
-	return time.Now()
-}

@@ -15,11 +15,16 @@
 //
 // Bind variables are @name only. The key in Args has no @. Do not write ? or $1
 // in SQL. Optional column types live in github.com/fluxsce/dbx/record.
+//
+// Config.Trace is the built-in statement log. Session plugins implement optional
+// hooks (EventPlugin, ContextPlugin) and do not replace Trace. Engine
+// differences stay in Dialect plugins.
 package db
 
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -40,8 +45,11 @@ type Config struct {
 	ConnMaxLifetime time.Duration
 	// ConnMaxIdleTime 为空闲连接最长存活时间；0 表示不因空闲关闭。
 	ConnMaxIdleTime time.Duration
-	// Trace 在每条语句和事务提交/回滚之后调用。nil 表示不记录。
-	// 慢查询阈值、SQL 脱敏和日志格式由调用方决定。
+	// Plugins 是这条连接池上的扩展，按顺序调用。语句日志用 Trace，不放进这个列表。
+	// 同一条池内名字必须唯一。钩子里不要再进入这个 *DB。
+	Plugins []Plugin
+	// Trace 是内置语句日志，每条语句和事务动作结束后调用。nil 表示不记录。
+	// 它不占插件名，并在 EventPlugin 之前执行。慢查询阈值和日志格式由调用方决定。
 	Trace TraceFunc
 }
 
@@ -55,11 +63,12 @@ type ctxExecer interface {
 // DB is the only session type. A nil tx auto-commits each statement.
 // A non-nil tx is bound to that transaction until Commit or Rollback.
 type DB struct {
-	pool  *sql.DB   // pool; Close shuts this down
-	tx    *sql.Tx   // non-nil while this session is a transaction
-	dial  Dialect   // bound at Open, read-only afterwards
-	done  bool      // Commit or Rollback already finished this transaction
-	trace TraceFunc // copied onto each Begin; nil disables tracing
+	pool  *sql.DB       // pool; Close shuts this down
+	tx    *sql.Tx       // non-nil while this session is a transaction
+	dial  Dialect       // bound at Open, read-only afterwards
+	done  bool          // Commit or Rollback already finished this transaction
+	hooks *sessionHooks // read-only after Open; shared with transactions from this pool
+	trace TraceFunc     // built-in statement log; copied onto each Begin
 }
 
 // Open 按 Driver 查找已 Register 的方言与 opener，Ping 成功后返回连接池会话。
@@ -70,6 +79,10 @@ func Open(ctx context.Context, cfg Config) (*DB, error) {
 	}
 	if cfg.DSN == "" {
 		return nil, fmt.Errorf("dbx: dsn is required")
+	}
+	hooks, err := buildHooks(cfg.Plugins)
+	if err != nil {
+		return nil, err
 	}
 	d, open, err := lookup(cfg.Driver)
 	if err != nil {
@@ -87,7 +100,7 @@ func Open(ctx context.Context, cfg Config) (*DB, error) {
 		_ = raw.Close() // Ping 失败时关掉半开连接，避免泄漏
 		return nil, fmt.Errorf("dbx: ping: %w", err)
 	}
-	return &DB{pool: raw, dial: d, trace: cfg.Trace}, nil
+	return &DB{pool: raw, dial: d, hooks: hooks, trace: cfg.Trace}, nil
 }
 
 // applyPool 把 Config 中大于 0 的池参数写到 *sql.DB；0 表示不改标准库默认。
@@ -142,12 +155,14 @@ func (d *DB) SQL() *sql.DB {
 // QuoteIdent 按当前引擎引用标识符，供拼接表名与列名。
 func (d *DB) QuoteIdent(name string) string { return d.dial.QuoteIdent(name) }
 
-// Close 关闭连接池。事务态会话不要调用 Close，由根会话在进程退出时关。
+// Close 关闭连接池，然后关闭实现了 io.Closer 的插件。
+// 事务态会话不要调用 Close，由根会话在进程退出时关。插件关闭时不要再使用这个 *DB。
 func (d *DB) Close() error {
 	if d == nil || d.pool == nil || d.tx != nil {
 		return nil
 	}
-	return d.pool.Close()
+	err := d.pool.Close()
+	return errors.Join(err, d.hooks.closePlugins())
 }
 
 // Exec runs a statement that does not return rows (INSERT, UPDATE, DELETE, DDL).
@@ -159,6 +174,7 @@ func (d *DB) Exec(ctx context.Context, query string, args Args) (sql.Result, err
 		d.finish(ctx, "exec", query, nil, 0, err, start)
 		return nil, err
 	}
+	ctx = d.before(ctx, "exec", q)
 	ex, err := d.conn()
 	if err != nil {
 		d.finish(ctx, "exec", q, vals, 0, err, start)
@@ -178,6 +194,7 @@ func (d *DB) Exec(ctx context.Context, query string, args Args) (sql.Result, err
 func (d *DB) execBound(ctx context.Context, qmark string, vals []any) (sql.Result, error) {
 	start := d.mark()
 	q := d.dial.Rebind(qmark)
+	ctx = d.before(ctx, "exec", q)
 	ex, err := d.conn()
 	if err != nil {
 		d.finish(ctx, "exec", q, vals, 0, err, start)
@@ -200,6 +217,7 @@ func (d *DB) Query(ctx context.Context, query string, args Args) (*sql.Rows, err
 		d.finish(ctx, "query", query, nil, 0, err, start)
 		return nil, err
 	}
+	ctx = d.before(ctx, "query", q)
 	ex, err := d.conn()
 	if err != nil {
 		d.finish(ctx, "query", q, vals, 0, err, start)
@@ -218,6 +236,7 @@ func (d *DB) QueryRow(ctx context.Context, query string, args Args) (*sql.Row, e
 		d.finish(ctx, "query", query, nil, 0, err, start)
 		return nil, err
 	}
+	ctx = d.before(ctx, "query", q)
 	ex, err := d.conn()
 	if err != nil {
 		d.finish(ctx, "query", q, vals, 0, err, start)

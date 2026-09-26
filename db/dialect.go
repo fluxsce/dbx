@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"reflect"
@@ -98,6 +99,48 @@ type MutationDialect interface {
 type PageDialect interface {
 	// PageSQL 返回改写后的分页查询。占位符仍是 @limit 与 @offset。
 	PageSQL(query string) string
+}
+
+// InsertLimit 是标准多行 INSERT 的单批上限。
+// 新引擎只返回自己的上限，不必改 db。未实现 InsertDialect 时按 200 行、1000 个占位符、跨批同一事务，并允许预编译。
+type InsertLimit struct {
+	// MaxRows 是单批最多行数。小于 1 时用默认。
+	MaxRows int
+	// MaxParams 是单批最多占位符。小于 1 时用默认。列数很多时行数会再缩小。
+	MaxParams int
+	// Atomic 为 true 时，跨批写入放进同一事务，中途失败整批回滚。
+	Atomic bool
+	// Prepare 为 true 时，相同的满批语句在本次调用内预编译一次，返回前关闭。
+	// 驱动把 Prepare 用作自己的批量协议时必须为 false，否则会占住提交回调。
+	Prepare bool
+}
+
+// InsertDialect 声明标准多行 INSERT 怎么分批。批量协议不同的引擎再实现 BulkDialect。
+type InsertDialect interface {
+	InsertLimit() InsertLimit
+}
+
+// BulkDialect 由标准多行 VALUES 不合适的引擎实现，逻辑留在该驱动包。
+// db 只在多行 Insert 时做类型断言。done 为 false 且 err 为 nil 时，改走标准多行 INSERT。
+type BulkDialect interface {
+	// BulkInsert 写入 n 行。row 返回与 columns 等长、已经绑定好的参数，只在被调用时取一行。
+	// 实现要自己释放语句，并且不要在已持有的连接之外再向池申请连接。
+	BulkInsert(ctx context.Context, sess *DB, table string, columns []string, n int, row func(i int) ([]any, error)) (done bool, err error)
+}
+
+// UpsertDialect 由「没有则插入、已有则更新」写成一条语句的引擎实现。
+// ClickHouse 不实现：重复键不会在写入当时更新那一行。
+// columns、keys、updates 都是未加引号的列名。n 是行数。占位符按行优先展开为 ?，由会话再 Rebind。
+type UpsertDialect interface {
+	// UpsertSQL 返回该引擎的 UPSERT 或 MERGE。n 小于 1 时按 1 行。
+	UpsertSQL(table string, columns, keys, updates []string, n int) string
+}
+
+// ErrorDialect 把驱动错误收成跨库分类。未实现时 Classify 返回 ErrorOther。
+// 原始错误不包装，调用方仍可用 errors.Is / errors.As 读取驱动类型。
+type ErrorDialect interface {
+	// Classify 识别唯一冲突、死锁、锁等待和序列化失败。其余返回 ErrorOther。
+	Classify(err error) ErrorKind
 }
 
 // ScanDialect 在公共赋值之前，把驱动专用值收成公共扫描能识别的值。

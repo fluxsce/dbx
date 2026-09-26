@@ -2,7 +2,9 @@ package db
 
 import (
 	"fmt"
+	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 // Args 命名参数表。SQL 写 @tenantId，键写 tenantId（不要带 @）。
@@ -20,6 +22,7 @@ func cloneArgs(args Args) Args {
 // compile 将业务 SQL 的 @name 展开为位置参数，再交给 Dialect.Rebind。
 // 业务侧禁止写 ? / $n；? 仅作内部中间态。@@ 转义为字面量 @。
 // 字符串字面量、标识符引号与注释中的 @ / ? 不参与占位符。
+// IN (@name) 的参数若是切片或数组，展开成 IN (?,?,?)。[]byte 仍是一个参数。
 func compile(d Dialect, query string, args Args) (string, []any, error) {
 	q, vals, err := expandNamed(query, args)
 	if err != nil {
@@ -66,6 +69,27 @@ func expandNamed(query string, args Args) (string, []any, error) {
 			if !ok {
 				return "", nil, fmt.Errorf("dbx: missing arg %q", name)
 			}
+			items, isList, err := listArgs(v)
+			if err != nil {
+				return "", nil, fmt.Errorf("dbx: arg %q: %w", name, err)
+			}
+			if isList {
+				if !inListPlaceholder(out) {
+					return "", nil, fmt.Errorf("dbx: arg %q is a list; write IN (@%s)", name, name)
+				}
+				if len(items) == 0 {
+					return "", nil, fmt.Errorf("dbx: arg %q is an empty list", name)
+				}
+				for k, item := range items {
+					if k > 0 {
+						out = append(out, ',')
+					}
+					out = append(out, '?')
+					vals = append(vals, item)
+				}
+				i = j
+				continue
+			}
 			bound, err := bindArg(v)
 			if err != nil {
 				return "", nil, fmt.Errorf("dbx: arg %q: %w", name, err)
@@ -79,6 +103,22 @@ func expandNamed(query string, args Args) (string, []any, error) {
 		i++
 	}
 	return string(out), vals, nil
+}
+
+// inListPlaceholder 报告占位符紧跟在 IN ( 之后，因此切片应展开成多个位置参数。
+func inListPlaceholder(sql []byte) bool {
+	s := strings.TrimRightFunc(string(sql), unicode.IsSpace)
+	if strings.HasSuffix(s, "(") {
+		s = strings.TrimRightFunc(s[:len(s)-1], unicode.IsSpace)
+	}
+	if len(s) < 2 || !strings.EqualFold(s[len(s)-2:], "in") {
+		return false
+	}
+	if len(s) == 2 {
+		return true
+	}
+	r, _ := utf8.DecodeLastRuneInString(s[:len(s)-2])
+	return !isIdentPart(r)
 }
 
 // rejectPositional 禁止业务 SQL 使用 ?，避免与 @name 混用、在 Postgres 上被误编成 $n。

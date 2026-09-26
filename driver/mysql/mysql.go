@@ -28,6 +28,11 @@ func (dialect) QuoteIdent(name string) string { return "`" + name + "`" }
 // LimitSQL 使用 LIMIT/OFFSET。
 func (dialect) LimitSQL() string { return "LIMIT @limit OFFSET @offset" }
 
+// InsertLimit：预编译协议最多 65535 个参数。单批 1000 行，控制包大小。多批同一事务。
+func (dialect) InsertLimit() db.InsertLimit {
+	return db.InsertLimit{MaxRows: 1000, MaxParams: 65535, Atomic: true, Prepare: true}
+}
+
 func open(dsn string) (*sql.DB, error) {
 	return sql.Open("mysql", dsn)
 }

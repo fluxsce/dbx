@@ -13,4 +13,8 @@ func TestMutationSQL(t *testing.T) {
 	if d.LimitSQL() == "" || d.QuoteIdent("id") != "`id`" {
 		t.Fatal(d.LimitSQL(), d.QuoteIdent("id"))
 	}
+	lim := d.InsertLimit()
+	if lim.MaxRows != 1000 || lim.MaxParams != 100000 || lim.Atomic || lim.Prepare {
+		t.Fatalf("insert limit %+v", lim)
+	}
 }

@@ -16,4 +16,8 @@ func TestDialect(t *testing.T) {
 	if d.LimitSQL() != "OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY" {
 		t.Fatal(d.LimitSQL())
 	}
+	lim := d.InsertLimit()
+	if lim.MaxRows != 1000 || lim.MaxParams != 2000 || !lim.Atomic || !lim.Prepare {
+		t.Fatalf("insert limit %+v", lim)
+	}
 }

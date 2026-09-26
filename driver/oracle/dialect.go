@@ -32,3 +32,8 @@ func (dialect) QuoteIdent(name string) string { return utils.Quote(name, `"`) }
 
 // LimitSQL 使用 OFFSET/FETCH。OrderBy 为空时，原 SQL 必须已有 ORDER BY。
 func (dialect) LimitSQL() string { return "OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY" }
+
+// InsertLimit：绑定变量上限 65535。单批 200 行，多批同一事务，满批可预编译。
+func (dialect) InsertLimit() db.InsertLimit {
+	return db.InsertLimit{MaxRows: 200, MaxParams: 65535, Atomic: true, Prepare: true}
+}

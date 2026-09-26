@@ -494,6 +494,43 @@ func asTime(src any) (time.Time, error) {
 	}
 }
 
+// listArgs 把切片或数组拆成逐项绑定值。[]byte、[N]byte 和 driver.Valuer 仍是单个参数。
+// 空切片返回 ok=true 且 items 为空，由调用方决定是否允许。
+func listArgs(v any) (items []any, ok bool, err error) {
+	if v == nil {
+		return nil, false, nil
+	}
+	if _, isValuer := v.(driver.Valuer); isValuer {
+		return nil, false, nil
+	}
+	rv := reflect.ValueOf(v)
+	for rv.Kind() == reflect.Pointer {
+		if rv.IsNil() {
+			return nil, false, nil
+		}
+		if rv.CanInterface() {
+			if _, isValuer := rv.Interface().(driver.Valuer); isValuer {
+				return nil, false, nil
+			}
+		}
+		rv = rv.Elem()
+	}
+	if rv.Kind() != reflect.Slice && rv.Kind() != reflect.Array {
+		return nil, false, nil
+	}
+	if rv.Type().Elem().Kind() == reflect.Uint8 {
+		return nil, false, nil
+	}
+	items = make([]any, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		items[i], err = bindValue(rv.Index(i))
+		if err != nil {
+			return nil, true, fmt.Errorf("index %d: %w", i, err)
+		}
+	}
+	return items, true, nil
+}
+
 // bindArg 把 Args 里的 Go 值收成驱动可绑定的值（含指针、Flag、时间）。
 func bindArg(v any) (any, error) {
 	if v == nil {

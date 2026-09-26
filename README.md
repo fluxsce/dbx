@@ -64,13 +64,15 @@ err = d.TxOptions(ctx, &sql.TxOptions{ReadOnly: true}, func(tx *db.DB) error {
 })
 ```
 
-SQL uses `@name` only. Keys in `Args` have no `@`. DDL goes through `Exec`.
+SQL uses `@name` only. Keys in `Args` have no `@`. The dialect rewrites that SQL to `?`, `$1`, or `:1`. A slice passed to `IN (@ids)` expands into one placeholder per element. An empty slice is an error. `[]byte` stays one value. A slice outside `IN` is an error. DDL goes through `Exec`.
+
+`Upsert` inserts a row when its key is absent and updates the other columns when the key exists. It is a separate method from `Insert`. ClickHouse does not support it. `Classify` maps unique violations, deadlocks, lock waits, and serialization failures to one kind. Retry the whole transaction only when `Retryable` is true. A unique violation is not retried as-is.
 
 `BeginOptions` and `TxOptions` take `*sql.TxOptions`. A nil value uses the engine default isolation level.
 
 One `Open` is one pool. An application with several databases keeps its own `map[string]*db.DB` and closes each pool when the process shuts down.
 
-`Config.Trace` runs after each statement and after begin, commit, and rollback. A nil trace does nothing. Slow-query thresholds and log formatting stay in the caller.
+`Config.Trace` is the built-in statement log. It runs after each statement and after begin, commit, and rollback, and it does not take a plugin name. A nil trace does nothing. `Config.Plugins` are bound to that pool, in order, for metrics, audit, or tracing. A `ContextPlugin` may replace the context before a connection is taken. Slow-query thresholds and log formatting stay in the caller. Plugins close with the pool. A hook must not call back into the same `*DB`.
 
 `Get`, `Select`, and `Each` close their rows. `Query` and `QueryPage` return rows for the caller to close.
 

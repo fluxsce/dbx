@@ -3,6 +3,8 @@ package db_test
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -413,6 +415,121 @@ func TestInsertBatch(t *testing.T) {
 	if len(list) != 3 || list[0].DemoID != "b1" || list[2].DemoName != "一批3" {
 		t.Fatalf("%+v", list)
 	}
+}
+
+func TestInsertChunksCommitAndRollBack(t *testing.T) {
+	dsn := filepath.Join(t.TempDir(), "t.db")
+	var ops []string
+	d, err := db.Open(context.Background(), db.Config{
+		Driver:       "sqlite",
+		DSN:          dsn,
+		MaxOpenConns: 1, // 分批时若再向池要连接，这里会死锁
+		Trace: func(_ context.Context, e db.Event) {
+			ops = append(ops, e.Op)
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if _, err := d.Exec(ctx, demoDDL, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	one := demoRow{TenantID: "default", DemoID: "one", DemoName: "单行", ActiveFlag: record.FlagY}
+	ops = nil
+	if err := d.Insert(ctx, "AI_DEMO", &one); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(ops, ",") != "exec" {
+		t.Fatalf("single insert ops %v", ops)
+	}
+
+	const n = 1001 // 超过 SQLite 单批 500 行，会预编译满批并留下余数
+	rows := make([]demoRow, n)
+	for i := range rows {
+		rows[i] = demoRow{
+			TenantID: "default", DemoID: fmt.Sprintf("c%04d", i), DemoName: "批", ActiveFlag: record.FlagY,
+		}
+	}
+	ops = nil
+	if err := d.Insert(ctx, "AI_DEMO", rows); err != nil {
+		t.Fatal(err)
+	}
+	if countDemo(t, d) != n+1 {
+		t.Fatalf("count %d", countDemo(t, d))
+	}
+	if !containsAll(ops, "begin", "exec", "commit") {
+		t.Fatalf("chunk ops %v", ops)
+	}
+
+	bad := make([]demoRow, 501)
+	for i := 0; i < 500; i++ {
+		bad[i] = demoRow{TenantID: "default", DemoID: fmt.Sprintf("d%04d", i), DemoName: "新", ActiveFlag: record.FlagY}
+	}
+	bad[500] = demoRow{TenantID: "default", DemoID: "d0000", DemoName: "重复", ActiveFlag: record.FlagY}
+	if err := d.Insert(ctx, "AI_DEMO", bad); err == nil {
+		t.Fatal("expected duplicate key")
+	}
+	if countDemo(t, d) != n+1 {
+		t.Fatalf("partial chunk stayed, count %d", countDemo(t, d))
+	}
+
+	err = d.Tx(ctx, func(tx *db.DB) error {
+		part := make([]demoRow, 600)
+		for i := range part {
+			part[i] = demoRow{
+				TenantID: "default", DemoID: fmt.Sprintf("z%04d", i), DemoName: "事务", ActiveFlag: record.FlagY,
+			}
+		}
+		if err := tx.Insert(ctx, "AI_DEMO", part); err != nil {
+			return err
+		}
+		return errors.New("roll back")
+	})
+	if err == nil {
+		t.Fatal("expected rollback")
+	}
+	if countDemo(t, d) != n+1 {
+		t.Fatalf("tx chunk stayed, count %d", countDemo(t, d))
+	}
+	if _, err := d.Exec(ctx, `INSERT INTO AI_DEMO (tenantId, demoId, demoName, activeFlag) VALUES ('default', 'after', '后', 'Y')`, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+const demoDDL = `CREATE TABLE AI_DEMO (
+	tenantId TEXT NOT NULL, demoId TEXT NOT NULL, demoName TEXT NOT NULL,
+	activeFlag TEXT NOT NULL, price TEXT, addTime TEXT, editTime TEXT,
+	PRIMARY KEY (tenantId, demoId)
+)`
+
+func countDemo(t *testing.T, d *db.DB) int {
+	t.Helper()
+	row, err := d.QueryRow(context.Background(), `SELECT COUNT(*) FROM AI_DEMO`, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := row.Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+func containsAll(ops []string, want ...string) bool {
+	seen := map[string]bool{}
+	for _, op := range ops {
+		seen[op] = true
+	}
+	for _, w := range want {
+		if !seen[w] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestEachAndEachTable(t *testing.T) {

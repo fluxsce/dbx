@@ -233,6 +233,78 @@ func TestManualCommitAndRollback(t *testing.T) {
 	}
 }
 
+func TestTxPanicRollsBackAndPoolStaysUsable(t *testing.T) {
+	d := openDemo(t)
+	defer d.Close()
+	ctx := context.Background()
+
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("panic must propagate")
+			}
+		}()
+		_ = d.Tx(ctx, func(tx *db.DB) error {
+			if _, err := tx.Exec(ctx, `INSERT INTO demo (name) VALUES (@name)`, db.Args{"name": "boom"}); err != nil {
+				return err
+			}
+			panic("dbx-test")
+		})
+	}()
+
+	if n := countDemo(t, d); n != 0 {
+		t.Fatalf("panic left rows=%d", n)
+	}
+	if _, err := d.Exec(ctx, `INSERT INTO demo (name) VALUES (@name)`, db.Args{"name": "after"}); err != nil {
+		t.Fatal(err)
+	}
+	if n := countDemo(t, d); n != 1 {
+		t.Fatalf("pool after panic rows=%d", n)
+	}
+}
+
+func TestTraceTransactionAndExecError(t *testing.T) {
+	dsn := filepath.Join(t.TempDir(), "t.db")
+	var ops []string
+	d, err := db.Open(context.Background(), db.Config{
+		Driver: "sqlite",
+		DSN:    dsn,
+		Trace: func(_ context.Context, e db.Event) {
+			ops = append(ops, e.Op)
+			if e.Op == "exec" && e.Err != nil && e.Duration < 0 {
+				t.Fatalf("duration %s", e.Duration)
+			}
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	ctx := context.Background()
+	if _, err := d.Exec(ctx, `CREATE TABLE demo (name TEXT)`, nil); err != nil {
+		t.Fatal(err)
+	}
+	err = d.Tx(ctx, func(tx *db.DB) error {
+		_, err := tx.Exec(ctx, `INSERT INTO demo (name) VALUES (@name)`, db.Args{"name": "a"})
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = d.Exec(ctx, `INSERT INTO missing (name) VALUES (@name)`, db.Args{"name": "x"})
+	if err == nil {
+		t.Fatal("expected exec error")
+	}
+	want := []string{"exec", "begin", "exec", "commit", "exec"}
+	if stringsJoin(ops) != stringsJoin(want) {
+		t.Fatalf("ops %v", ops)
+	}
+}
+
+func stringsJoin(ss []string) string {
+	return fmt.Sprint(ss)
+}
+
 func TestConcurrentPoolAndTransactions(t *testing.T) {
 	dsn := filepath.Join(t.TempDir(), "t.db") + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
 	d, err := db.Open(context.Background(), db.Config{Driver: "sqlite", DSN: dsn, MaxOpenConns: 8})

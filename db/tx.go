@@ -29,12 +29,13 @@ func (d *DB) BeginOptions(ctx context.Context, opt *sql.TxOptions) (*DB, error) 
 		return nil, fmt.Errorf("dbx: transaction already started")
 	}
 	start := d.mark()
+	ctx = d.before(ctx, "begin", "")
 	raw, err := d.pool.BeginTx(ctx, opt)
 	d.finish(ctx, "begin", "", nil, 0, err, start)
 	if err != nil {
 		return nil, err
 	}
-	return &DB{pool: d.pool, tx: raw, dial: d.dial, trace: d.trace}, nil
+	return &DB{pool: d.pool, tx: raw, dial: d.dial, hooks: d.hooks, trace: d.trace}, nil
 }
 
 // Commit commits this transaction. Further calls on this session fail.

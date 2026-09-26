@@ -1,6 +1,10 @@
 package oracle
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/fluxsce/dbx/db"
+)
 
 // dialect11 用 ROW_NUMBER 分页，因为 Oracle 11g 没有 OFFSET/FETCH。
 // QueryPage 与 SelectPage 会调用 PageSQL。手写查询应使用 db.PageSQL，不要自行追加 LimitSQL。
@@ -17,6 +21,9 @@ func (dialect11) QuoteIdent(name string) string { return dialect{}.QuoteIdent(na
 
 // LimitSQL 返回空串。11g 不能追加后缀，分页由 PageSQL 改写整句。
 func (dialect11) LimitSQL() string { return "" }
+
+// InsertLimit 与 12c 相同。
+func (dialect11) InsertLimit() db.InsertLimit { return dialect{}.InsertLimit() }
 
 // PageSQL 用 ROW_NUMBER 包住查询。没有 ORDER BY 时按 ROWID 排序。
 func (dialect11) PageSQL(query string) string {

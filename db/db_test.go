@@ -83,6 +83,55 @@ func TestQuestionMarkInStringAllowed(t *testing.T) {
 	}
 }
 
+func TestCompileInList(t *testing.T) {
+	d := dollarDialect{}
+	q, vals, err := compile(d, "SELECT id FROM t WHERE id IN (@ids) AND name = @name", Args{
+		"ids":  []string{"a", "b"},
+		"name": "ada",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if q != "SELECT id FROM t WHERE id IN ($1,$2) AND name = $3" {
+		t.Fatalf("got %q", q)
+	}
+	if len(vals) != 3 || vals[0] != "a" || vals[1] != "b" || vals[2] != "ada" {
+		t.Fatalf("%v", vals)
+	}
+
+	q, vals, err = compile(qmarkDialect{}, "SELECT id FROM t WHERE id NOT IN (@ids)", Args{
+		"ids": []int{1},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if q != "SELECT id FROM t WHERE id NOT IN (?)" || vals[0] != 1 {
+		t.Fatalf("%q %v", q, vals)
+	}
+
+	if _, _, err = compile(qmarkDialect{}, "SELECT id FROM t WHERE id = @ids", Args{"ids": []int{1}}); err == nil {
+		t.Fatal("list outside IN")
+	}
+	if _, _, err = compile(qmarkDialect{}, "SELECT id FROM t WHERE id IN (@ids)", Args{"ids": []int{}}); err == nil {
+		t.Fatal("empty list")
+	}
+	ids := []int{7, 8}
+	q, _, err = compile(qmarkDialect{}, "SELECT id FROM t WHERE id IN (\n@ids)", Args{"ids": &ids})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if q != "SELECT id FROM t WHERE id IN (\n?,?)" {
+		t.Fatalf("got %q", q)
+	}
+	q, vals, err = compile(qmarkDialect{}, "SELECT id FROM t WHERE blob = @b", Args{"b": []byte{1, 2}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if q != "SELECT id FROM t WHERE blob = ?" || len(vals) != 1 {
+		t.Fatalf("%q %v", q, vals)
+	}
+}
+
 func TestExpandNamedSetAndWhereSeparate(t *testing.T) {
 	setSQL, setVals, err := expandNamed(`"demoId" = @demoId`, Args{"demoId": "new"})
 	if err != nil {

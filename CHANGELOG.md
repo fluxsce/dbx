@@ -6,6 +6,14 @@
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-09-26
+
+### 变更
+- **`Upsert` 与错误分类**：`Upsert` 单独执行「没有则插入、已有则更新」。PostgreSQL 与 SQLite 用 `ON CONFLICT`，MySQL 用 `ON DUPLICATE KEY UPDATE`，SQL Server 与 Oracle 用 `MERGE`。ClickHouse 不提供该方法。`Classify` 把唯一冲突、死锁、锁等待和序列化失败收成 `ErrorKind`；`Retryable` 只对后三类为真。原始驱动错误不包装。
+- **`IN (@name)` 展开切片**：参数是切片或数组时写成多个位置参数，再由方言改成 `?`、`$1` 或 `:1`。空切片报错。`[]byte` 仍是一个参数。切片写在 `IN` 之外会报错。
+- **会话插件**：`Config.Plugins` 按可选接口挂到一条连接池上，并复制到它开出的事务。`EventPlugin` 在语句结束后收事件，`ContextPlugin` 在取连接前改写 context。实现了 `io.Closer` 的插件随连接池关闭。不设全局插件表。语句日志仍是内置的 `Config.Trace`，不放进插件列表。
+- **批量 Insert 按引擎上限分批**：标准多行 INSERT 由 `InsertLimit` 声明单批行数、占位符、是否同一事务、能否预编译。满批语句在本次调用结束时关闭，事务中不再向连接池另取连接。另一种批量协议实现 `BulkDialect`，代码留在该驱动包；ClickHouse 的原生批量块即如此。未处理时仍走标准 INSERT。
+
 ## [1.0.0] - 2026-09-26
 
 ### 新增
