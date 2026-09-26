@@ -6,6 +6,12 @@
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-09-26
+
+### 变更
+- **文档**：README 只保留安装、示例和引擎入口。约定、引擎对照、版本、从 sqlx 迁入和语句观测放在 `docs/`，英文为 `.en.md`，中文为 `.zh-CN.md`。
+- **CI**：拉取请求和 `main` 上的测试拉起 MySQL 8.4、ClickHouse 24.8、PostgreSQL 16 和 SQL Server 2022，跑活库场景。SQLite 仍由同一次 `go test` 执行。Oracle 不进这条流水线。
+
 ## [1.0.1] - 2026-09-26
 
 ### 变更

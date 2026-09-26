@@ -8,10 +8,68 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: dbx
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=20
+      clickhouse:
+        image: clickhouse/clickhouse-server:24.8
+        env:
+          CLICKHOUSE_DB: dbx
+          CLICKHOUSE_USER: default
+          CLICKHOUSE_PASSWORD: ci
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+        ports:
+          - 9000:9000
+        options: >-
+          --health-cmd "clickhouse-client --user default --password ci --query 'SELECT 1'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 20
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: dbx
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      sqlserver:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: Y
+          MSSQL_SA_PASSWORD: Dbx_ci_Pass1
+          MSSQL_PID: Developer
+        ports:
+          - 1433:1433
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P Dbx_ci_Pass1 -C -Q 'SELECT 1' -b"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 30
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
       - name: Test
-        run: go test ./...
+        env:
+          DBX_MYSQL_DSN: root:root@tcp(127.0.0.1:3306)/dbx?parseTime=true
+          DBX_CLICKHOUSE_DSN: clickhouse://default:ci@127.0.0.1:9000/dbx?dial_timeout=10s
+          DBX_POSTGRES_DSN: postgres://postgres:postgres@127.0.0.1:5432/dbx?sslmode=disable
+          DBX_SQLSERVER_DSN: sqlserver://sa:Dbx_ci_Pass1@127.0.0.1:1433?database=master&encrypt=disable
+        run: go test -count=1 ./...
