@@ -7,7 +7,7 @@ func TestDialect(t *testing.T) {
 	if d.Name() != "sqlserver" {
 		t.Fatal(d.Name())
 	}
-	if got := d.Rebind("a=? AND b=?"); got != "a=? AND b=?" {
+	if got := d.Rebind("a=? AND b=?"); got != "a=@p1 AND b=@p2" {
 		t.Fatal(got)
 	}
 	if d.QuoteIdent("id") != "[id]" || d.QuoteIdent("a]b") != "[a]]b]" {

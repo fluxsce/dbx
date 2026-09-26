@@ -9,7 +9,7 @@ Business SQL always uses `@name`. The columns below are what the driver receives
 | SQLite | `?` | `"` | `LIMIT` / `OFFSET` | `ON CONFLICT` | `UPDATE` / `DELETE` |
 | PostgreSQL | `$1` | `"` | `LIMIT` / `OFFSET` | `ON CONFLICT` | `UPDATE` / `DELETE` |
 | MySQL, MariaDB | `?` | `` ` `` | `LIMIT` / `OFFSET` | `ON DUPLICATE KEY UPDATE` | `UPDATE` / `DELETE` |
-| SQL Server | `?`, then the driver uses `@p1` | `[` `]` | `OFFSET` / `FETCH` | `MERGE` | `UPDATE` / `DELETE` |
+| SQL Server | `@p1` | `[` `]` | `OFFSET` / `FETCH` | `MERGE` | `UPDATE` / `DELETE` |
 | Oracle 12c and newer | `:1` | `"` | `OFFSET` / `FETCH` | `MERGE` | `UPDATE` / `DELETE` |
 | Oracle 11g | `:1` | `"` | `ROW_NUMBER` around the statement | `MERGE` | `UPDATE` / `DELETE` |
 | ClickHouse | `?` | `` ` `` | `LIMIT` / `OFFSET` | unsupported | `ALTER TABLE … UPDATE` / `DELETE` |

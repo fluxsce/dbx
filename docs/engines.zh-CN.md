@@ -9,7 +9,7 @@
 | SQLite | `?` | `"` | `LIMIT` / `OFFSET` | `ON CONFLICT` | `UPDATE` / `DELETE` |
 | PostgreSQL | `$1` | `"` | `LIMIT` / `OFFSET` | `ON CONFLICT` | `UPDATE` / `DELETE` |
 | MySQL、MariaDB | `?` | `` ` `` | `LIMIT` / `OFFSET` | `ON DUPLICATE KEY UPDATE` | `UPDATE` / `DELETE` |
-| SQL Server | `?`，再由驱动改成 `@p1` | `[` `]` | `OFFSET` / `FETCH` | `MERGE` | `UPDATE` / `DELETE` |
+| SQL Server | `@p1` | `[` `]` | `OFFSET` / `FETCH` | `MERGE` | `UPDATE` / `DELETE` |
 | Oracle 12c 及更新版本 | `:1` | `"` | `OFFSET` / `FETCH` | `MERGE` | `UPDATE` / `DELETE` |
 | Oracle 11g | `:1` | `"` | 用 `ROW_NUMBER` 包住整句 | `MERGE` | `UPDATE` / `DELETE` |
 | ClickHouse | `?` | `` ` `` | `LIMIT` / `OFFSET` | 不支持 | `ALTER TABLE … UPDATE` / `DELETE` |

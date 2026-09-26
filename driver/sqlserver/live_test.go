@@ -8,7 +8,7 @@ import (
 	"github.com/fluxsce/dbx/internal/livetest"
 )
 
-// 真库场景覆盖 SQL Server 与 SQLite 不同的部分：业务 SQL 仍写 @name，驱动把 ? 收成 @p1；
+// 真库场景覆盖 SQL Server 与 SQLite 不同的部分：业务 SQL 仍写 @name，会话把 ? 收成 @p1；
 // 标识符用方括号；分页是 OFFSET/FETCH；Upsert 是 MERGE；2627 收成唯一冲突。
 // 设置 DBX_SQLSERVER_DSN 才运行。
 // 例：sqlserver://sa:Dbx_ci_Pass1@127.0.0.1:1433?database=master&encrypt=disable

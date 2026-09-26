@@ -16,6 +16,12 @@ func RebindColon(query string) string {
 	return rebind(query, ":")
 }
 
+// RebindAtP 把每个 ? 换成 @p1、@p2，供 SQL Server 的 sqlserver 驱动使用。
+// 该驱动不改写占位符，序号参数必须已经是 @pN。
+func RebindAtP(query string) string {
+	return rebind(query, "@p")
+}
+
 // Quote 用 mark 包裹标识符，例如反引号或双引号。
 // 名字里的 mark 会写成两个。
 func Quote(name, mark string) string {

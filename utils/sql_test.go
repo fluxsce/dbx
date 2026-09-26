@@ -9,6 +9,9 @@ func TestRebind(t *testing.T) {
 	if got := RebindColon("a=? AND b=?"); got != "a=:1 AND b=:2" {
 		t.Fatal(got)
 	}
+	if got := RebindAtP("a=? AND b=?"); got != "a=@p1 AND b=@p2" {
+		t.Fatal(got)
+	}
 }
 
 func TestQuote(t *testing.T) {
