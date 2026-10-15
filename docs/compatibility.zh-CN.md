@@ -40,7 +40,12 @@ NULL 写成零值；字段是指针时写成 nil。非 NULL 扫进 `*T` 时会�
 
 ## 分页
 
-`QueryPage`、`SelectPage` 和 `PageSQL` 使用当前引擎的分页。`Page` 的字段是 `Page`、`PageSize`、`OrderBy`、`Desc`。小于 1 的页码按 1。小于 1 的页大小按 20。dbx 不截断页大小，也不解析 URL。`OrderBy` 替换最外层 `ORDER BY`。各引擎子句见 [引擎](engines.zh-CN.md)。
+`QueryPage`、`SelectPage` 和 `PageSQL` 使用当前引擎的分页。
+
+- **自动计数（常用）**：只传 listSQL。`SelectPage` / `QueryPage` 内部用 `CountSQL` 生成瘦 COUNT（去掉最外层 `ORDER BY` / `LIMIT` / `OFFSET` / `FETCH`，改写成 `SELECT COUNT(*) AS cnt FROM …`；遇最外层 `DISTINCT` / `GROUP BY` / 集合运算时再包一层）。
+- **手写计数（更直观）**：`SelectPageCount` / `QueryPageCount` 传入 countSQL，例如 `SELECT COUNT(*) AS cnt FROM t`+where；`countSQL` 为空时与自动计数相同。
+
+`Page` 的字段是 `Page`、`PageSize`、`OrderBy`、`Desc`。小于 1 的页码按 1。小于 1 的页大小按 20。dbx 不截断页大小，也不解析 URL。`OrderBy` 替换最外层 `ORDER BY`。各引擎子句见 [引擎](engines.zh-CN.md)。
 
 ## 一次发布可以改什么
 

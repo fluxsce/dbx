@@ -40,7 +40,12 @@ NULL becomes the zero value, or a nil pointer when the field is a pointer. A non
 
 ## Paging
 
-`QueryPage`, `SelectPage`, and `PageSQL` apply the current engine's paging. `Page` fields are `Page`, `PageSize`, `OrderBy`, and `Desc`. A page below 1 becomes 1. A page size below 1 becomes 20. dbx does not cap the page size and does not read the URL. `OrderBy` replaces the outer `ORDER BY`. Per-engine clauses are in [Engines](engines.en.md).
+`QueryPage`, `SelectPage`, and `PageSQL` apply the current engine's paging.
+
+- **Auto count (common)**: pass only list SQL. `SelectPage` / `QueryPage` use `CountSQL` (strip outer `ORDER BY` / `LIMIT` / `OFFSET` / `FETCH`, rewrite to `SELECT COUNT(*) AS cnt FROM …`; wrap for outer `DISTINCT` / `GROUP BY` / set operators).
+- **Explicit count**: pass countSQL to `SelectPageCount` / `QueryPageCount` (e.g. `SELECT COUNT(*) AS cnt FROM t`+where). Empty countSQL falls back to auto count.
+
+`Page` fields are `Page`, `PageSize`, `OrderBy`, and `Desc`. A page below 1 becomes 1. A page size below 1 becomes 20. dbx does not cap the page size and does not read the URL. `OrderBy` replaces the outer `ORDER BY`. Per-engine clauses are in [Engines](engines.en.md).
 
 ## What a release may change
 

@@ -152,7 +152,6 @@ func TestLiveMySQL(t *testing.T) {
 
 	var page []row
 	total, err := d.SelectPage(ctx, &page,
-		`SELECT COUNT(*) FROM `+table,
 		`SELECT name, amount, on_flag, at, yes FROM `+table+` ORDER BY name`,
 		db.Page{Page: 1, PageSize: 1, OrderBy: "name"},
 		nil,

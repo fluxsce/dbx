@@ -125,7 +125,6 @@ func Run(t *testing.T, driver, dsn, table, amountType, timeType, boolType string
 
 	var page []row
 	total, err := d.SelectPage(ctx, &page,
-		`SELECT COUNT(*) FROM `+qt,
 		`SELECT `+cols+` FROM `+qt+` ORDER BY `+d.QuoteIdent("demoName"),
 		db.Page{Page: 1, PageSize: 1, OrderBy: "demoName"},
 		nil,

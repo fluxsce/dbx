@@ -206,7 +206,7 @@ func TestLiveClickHouse(t *testing.T) {
 	}
 
 	var page []chRow
-	total, err := d.SelectPage(ctx, &page,
+	total, err := d.SelectPageCount(ctx, &page,
 		`SELECT toInt64(count()) FROM `+table,
 		`SELECT id, name, amount, on_flag, at, yes, uid, tags FROM `+table+` ORDER BY name`,
 		db.Page{Page: 1, PageSize: 1, OrderBy: "name"},

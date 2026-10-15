@@ -6,6 +6,16 @@
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-10-15
+
+### 新增
+- `Count` / `Exists`：计数值与是否有行。
+- `CountSQL`：对齐 gateway 瘦计数——去掉 ORDER BY/LIMIT/OFFSET/FETCH，优先 `SELECT COUNT(*) AS cnt FROM …`（不带宽投影）；`DISTINCT`/`GROUP BY`/集合运算再包层。
+- `SelectPage` / `QueryPage`：只传列表 SQL 即可自动 COUNT；`SelectPageCount` / `QueryPageCount` 可直接写入 countSQL 做直观统计（空 countSQL 等同自动）。
+
+### 变更
+- 不再提供公开的标量 `Scan`；单行结构体用 `Get`，计数用 `Count`。
+
 ## [1.0.2] - 2026-09-26
 
 ### 变更

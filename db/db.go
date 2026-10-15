@@ -246,19 +246,26 @@ func (d *DB) QueryRow(ctx context.Context, query string, args Args) (*sql.Row, e
 	return ex.QueryRowContext(ctx, q, vals...), nil
 }
 
-// QueryPage 先跑 countSQL 得到 total，再按当前引擎给 listSQL 分页。
-// countSQL 与 listSQL 应使用同一套 @name。后缀引擎不要在 listSQL 里自行写 LIMIT / FETCH。
-// Oracle 11g 由 PageSQL 改写整句。返回的 Rows 由调用方关闭。
-func (d *DB) QueryPage(ctx context.Context, countSQL, listSQL string, page Page, args Args) (rows *sql.Rows, total int64, err error) {
+// QueryPage 按 listSQL 分页。不传 countSQL：内部走 QueryPageCount（空 count → 自动 CountSQL）。
+// 返回的 Rows 由调用方关闭。后缀引擎不要在 listSQL 里自行写 LIMIT / FETCH。
+// Oracle 11g 由 PageSQL 改写整句。手写计数用 QueryPageCount。
+func (d *DB) QueryPage(ctx context.Context, listSQL string, page Page, args Args) (rows *sql.Rows, total int64, err error) {
+	return d.QueryPageCount(ctx, "", listSQL, page, args)
+}
+
+// QueryPageCount 分页并指定计数 SQL。
+// countSQL 非空时直接用该语句取总数；为空时用 CountSQL(listSQL) 自动生成。
+// countSQL 与 listSQL 应使用同一套 @name。
+func (d *DB) QueryPageCount(ctx context.Context, countSQL, listSQL string, page Page, args Args) (rows *sql.Rows, total int64, err error) {
+	if strings.TrimSpace(countSQL) == "" {
+		countSQL = CountSQL(listSQL)
+	}
 	paged, err := d.PageSQL(listSQL, page)
 	if err != nil {
 		return nil, 0, err
 	}
-	row, err := d.QueryRow(ctx, countSQL, args)
+	total, err = d.Count(ctx, countSQL, args)
 	if err != nil {
-		return nil, 0, err
-	}
-	if err := row.Scan(&total); err != nil {
 		return nil, 0, err
 	}
 	args = BindPage(args, page)

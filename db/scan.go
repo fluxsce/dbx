@@ -84,19 +84,28 @@ func (d *DB) Select(ctx context.Context, dest any, query string, args Args) erro
 	return rows.Err()
 }
 
-// SelectPage 先执行 countSQL 得到总数，再把当前页扫入 dest（*[]struct）。
+// SelectPage 按 listSQL 分页扫入 dest（*[]struct / *[]*struct）。
+// 不传 countSQL：内部走 SelectPageCount，countSQL 为空时由 CountSQL(listSQL) 自动生成。
 // 分页由 PageSQL 决定：多数引擎追加 LimitSQL，Oracle 11g 改写整句。
-func (d *DB) SelectPage(ctx context.Context, dest any, countSQL, listSQL string, page Page, args Args) (int64, error) {
+// 需要手写计数时用 SelectPageCount。
+func (d *DB) SelectPage(ctx context.Context, dest any, listSQL string, page Page, args Args) (int64, error) {
+	return d.SelectPageCount(ctx, dest, "", listSQL, page, args)
+}
+
+// SelectPageCount 分页并指定计数 SQL。
+// countSQL 非空时直接执行该语句取总数（便于直观统计，如去掉展示 JOIN）；
+// countSQL 为空时等价于 SelectPage，用 CountSQL(listSQL) 自动生成。
+// countSQL 与 listSQL 应使用同一套 @name。
+func (d *DB) SelectPageCount(ctx context.Context, dest any, countSQL, listSQL string, page Page, args Args) (int64, error) {
+	if strings.TrimSpace(countSQL) == "" {
+		countSQL = CountSQL(listSQL)
+	}
 	paged, err := d.PageSQL(listSQL, page)
 	if err != nil {
 		return 0, err
 	}
-	row, err := d.QueryRow(ctx, countSQL, args)
+	total, err := d.Count(ctx, countSQL, args)
 	if err != nil {
-		return 0, err
-	}
-	var total int64
-	if err := row.Scan(&total); err != nil {
 		return 0, err
 	}
 	err = d.Select(ctx, dest, paged, BindPage(args, page))

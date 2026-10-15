@@ -130,7 +130,6 @@ func TestInsertUpdateDeleteGetSelect(t *testing.T) {
 
 	var page []demoRow
 	total, err := d.SelectPage(ctx, &page,
-		`SELECT COUNT(*) FROM AI_DEMO WHERE tenantId=@tenantId`,
 		`SELECT `+cols+` FROM AI_DEMO WHERE tenantId=@tenantId ORDER BY demoId`,
 		db.Page{Page: 1, PageSize: 1},
 		db.Args{"tenantId": "default"},
